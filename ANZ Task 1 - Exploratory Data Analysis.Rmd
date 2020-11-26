@@ -1,0 +1,236 @@
+---
+title: "ANZ Presentation"
+author: "Rinaldo Gagiano"
+output: pdf_document
+---
+
+```{r, include=FALSE,echo=FALSE}
+library(readxl)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(maps)
+library(sf)
+library(tibble)
+library(ozmaps)
+library(rgeos)
+library(ggspatial)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+
+## Data Import and Clean
+
+```{r, include=TRUE,echo = TRUE,warning=FALSE}
+anz <- read_xlsx("ANZ.xlsx") #Data import
+anz <- anz[,c(-3:-5,-8,-9,-19,-20,-21,-23)] #Unnecessary column removal
+anz <- na.omit(anz)#NA Removals
+colSums(is.na(anz)) #Null value Check
+```
+
+## Dataframe Manipulation
+```{r, include=TRUE,echo = TRUE,warning=FALSE}
+anz <- anz %>% separate(`long_lat`,into = c("long","lat"),
+                        sep=" ") #Customer and Merchant Column Split
+anz <- anz %>% separate(`merchant_long_lat`, into = c("mer_long","mer_lat"), sep=" ")
+anz$long <- as.numeric(anz$long) #Type Change
+anz$lat <- as.numeric(anz$lat) #Type Change
+anz$mer_long <- as.numeric(anz$mer_long) #Type Change
+anz$mer_lat <- as.numeric(anz$mer_lat) #Type Change
+anz$date <- as.Date(anz$date) #Type Change
+anz <- anz %>% mutate(week=strftime(anz$date,format="%V")) #Week Number
+anz <- anz %>% mutate(month=strftime(anz$date,format="%m")) #Month Number
+```
+
+
+## General Summary
+```{r,include=TRUE,echo = FALSE}
+summary(anz[,c(7,14)])
+paste0("$",(round(mean(anz$amount),2))," ~ ","average transaction amount")
+paste0((round(mean(table(anz$first_name))))," ~ ","average transactions per person")
+paste0("$",(round(mean(anz$balance),2))," ~ ","average balance amount")
+paste0(anz %>% distinct(first_name,.keep_all=TRUE) %>% 
+  summarise("Mean Age" = round(mean(age)))," ~ ","average age of customer")
+
+```
+
+## Insights - Weekly Transaction // Weekly Balance
+
+```{r,include=TRUE,echo = FALSE,fig.show = "hold",message=FALSE,out.width = "44%"}
+anz %>% 
+  group_by(week) %>% 
+  summarise("mean amount" = mean(amount)) %>%
+  ggplot( aes(x=week, y=`mean amount`,group=1)) +
+  geom_area(fill="#69b3a2",alpha=0.5) +
+  geom_line(colour="#69b3a2") +
+  ylab("Average Transaction Amount Weekly ($)")+
+  xlab("Week (Aug - Nov)")
+anz %>% 
+  group_by(week) %>% 
+  summarise("mean balance" = mean(balance)) %>%
+  ggplot( aes(x=week, y=`mean balance`,group=1)) +
+  geom_area(fill="#69b3a2",alpha=0.5) +
+  geom_line(colour="#69b3a2") +
+  ylab("Average Balance Amount Weekly ($)")+
+  xlab("Week (Aug - Nov)")
+```
+
+```{r,include=TRUE,echo = FALSE,fig.show = "hold",message=FALSE,out.width = "44%"}
+anz %>% 
+  group_by(week,gender) %>%
+  summarise("ave amount" =mean(amount))%>%
+  ggplot( aes(x=week, y=`ave amount`, group=gender,fill=gender,colour=gender)) +
+  geom_line() +
+  geom_point() +
+  ylab("Average Transaction Amount Weekly ($)")+
+  xlab("Week (Aug - Nov)")
+anz %>% 
+  group_by(week,gender) %>%
+  summarise("average balance" =mean(balance))%>%
+  ggplot( aes(x=week, y=`average balance`, group=gender,fill=gender,colour=gender)) +
+  geom_line() +
+  geom_point() +
+  ylab("Average Balance Amount Weekly ($)")+
+  xlab("Week (Aug - Nov)")
+```
+
+## Insights - Daily Transaction // Daily Balance
+
+```{r,include=TRUE,echo = FALSE,fig.show = "hold",message=FALSE,out.width = "44%"}
+anz %>% 
+  group_by(date) %>% 
+  summarise("mean amount" = mean(amount)) %>%
+  ggplot( aes(x=date, y=`mean amount`,group=1)) +
+  geom_area(fill="#69b3a2",alpha=0.5) +
+  geom_line(colour="#69b3a2") +
+  ylab("Average Transaction Amount Daily ($)")+
+  xlab("Daily")
+anz %>% 
+  group_by(date) %>% 
+  summarise("mean balance" = mean(balance)) %>%
+  ggplot( aes(x=date, y=`mean balance`,group=1)) +
+  geom_area(fill="#69b3a2",alpha=0.5) +
+  geom_line(colour="#69b3a2") +
+  ylab("Average Balance Amount Daily ($)")+
+  xlab("Daily")
+```
+
+```{r,include=TRUE,echo = FALSE,fig.show = "hold",message=FALSE,out.width = "44%"}
+anz %>% 
+  group_by(date,gender) %>%
+  summarise("ave amount" =mean(amount))%>%
+  ggplot( aes(x=date, y=`ave amount`, group=gender,fill=gender,colour=gender)) +
+  geom_line() +
+  geom_point() +
+  ylab("Average Transaction Amount Daily ($)")+
+  xlab("Daily")
+anz %>% 
+  group_by(date,gender) %>%
+  summarise("average balance" =mean(balance))%>%
+  ggplot( aes(x=date, y=`average balance`, group=gender,fill=gender,colour=gender)) +
+  geom_line() +
+  geom_point() +
+  ylab("Average Balance Amount Daily ($)")+
+  xlab("Daily")
+```
+
+## Insight - Geolocation
+### Merchant Transaction Map
+```{r,include=TRUE,echo = FALSE,message=FALSE,out.height="80%"}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+world <- world %>% filter(sovereignt=="Australia")
+# gene world map
+ggplot(data = world) +
+  geom_sf(fill="#69b3a2") +
+  labs( x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(100.00, 160.00), ylim = c(-45.00, -10.00), expand = FALSE) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+                         pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  geom_point(data=anz,aes(x=mer_long, y=mer_lat),colour="#DD7524")+
+  theme_bw()
+```
+
+### Merchant Transactions Per State
+
+```{r,include=TRUE,echo = FALSE,message=FALSE}
+sort(table(anz$merchant_state),decreasing=TRUE)
+```
+
+### Top 10 Merchant Transactions Per Suberb
+
+```{r,include=TRUE,echo = FALSE,message=FALSE}
+head(sort(table(anz$merchant_suburb),decreasing=TRUE),10)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
